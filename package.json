@@ -1,0 +1,35 @@
+{
+  "name": "dmail-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "dMail — Decentralized Email using Filecoin Onchain Cloud + ENS",
+  "workspaces": [
+    "frontend",
+    "scripts",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace frontend",
+    "preview": "npm run preview --workspace frontend",
+    "send:cli": "node scripts/sendEmail.js",
+    "read:cli": "node scripts/readInbox.js",
+    "derive:pubkey": "node scripts/derivePublicKey.js",
+    "check:ens": "node scripts/checkEnsRecord.js",
+    "format": "prettier --write .",
+    "lint": "npm run lint --workspace frontend"
+  },
+  "dependencies": {
+    "@filoz/synapse-sdk": "^0.35.3",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.10.0",
+    "pino": "^10.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  },
+  "license": "MIT"
+}

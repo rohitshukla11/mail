@@ -1,0 +1,116 @@
+name: Upload to Filecoin + ENS
+
+on:
+  workflow_run:
+    workflows: ["Build Site"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Optional: Run ID of a prior 'Build Site' workflow whose artifact to use"
+        required: false
+      dry_run:
+        description: "Dry-run upload (no onchain storage)"
+        type: boolean
+        default: true
+      update_ens:
+        description: "Update ENS after upload (manual runs)"
+        type: boolean
+        default: false
+
+jobs:
+  upload:
+    # Run when Build Site succeeded OR allow manual dispatch always
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: "Preflight: validate upload configuration"
+        run: |
+          missing=()
+          if [ -z "${{ secrets.FILECOIN_WALLET_KEY }}" ]; then missing+=(FILECOIN_WALLET_KEY); fi
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required Actions secrets: ${missing[*]}"
+            echo "These must be set in Settings → Secrets and variables → Actions (Repository secrets)."
+            exit 1
+          fi
+
+      - name: "Preflight: validate ENS configuration (only when updating ENS)"
+        if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.update_ens == 'true') }}
+        run: |
+          missing=()
+          if [ -z "${{ vars.ENS_NAME }}" ] && [ -z "${{ secrets.ENS_NAME }}" ]; then missing+=(ENS_NAME); fi
+          if [ -z "${{ secrets.ETHEREUM_RPC_URL }}" ]; then missing+=(ETHEREUM_RPC_URL); fi
+          if [ -z "${{ secrets.ENS_PRIVATE_KEY }}" ]; then missing+=(ENS_PRIVATE_KEY); fi
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required ENS configuration: ${missing[*]}"
+            echo "- ENS_NAME can be set as a Repository variable (vars) or Secret"
+            echo "Set these under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Checkout repo (trusted)
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts (from workflow_run)
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: site-dist
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.event.workflow_run.repository.full_name }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download build artifacts (manual, from input run id)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: site-dist
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.build_run_id }}
+
+      - name: "Fallback: Build site locally (no artifact available)"
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_run_id == '' }}
+        run: |
+          mkdir -p dist
+          cp -R site/* dist/
+          
+      - name: Select random known good provider
+        run: |
+          known_good_provider_ids=(2 8)
+          selected_provider_id=${known_good_provider_ids[$RANDOM % ${#known_good_provider_ids[@]}]}
+          echo "PROVIDER_ID=$selected_provider_id" >> $GITHUB_ENV
+          echo "Selected known good provider ID: $selected_provider_id"
+          
+      - name: Upload to Filecoin
+        id: filecoin
+        uses: filecoin-project/filecoin-pin/upload-action@v0.9.2
+        with:
+          path: dist
+          walletPrivateKey: ${{ secrets.FILECOIN_WALLET_KEY }}
+          network: calibration
+          minStorageDays: "30"
+          filecoinPayBalanceLimit: "0.25"
+          # Dry-run on PR-triggered workflow_run; for manual runs use input
+          dryRun: "${{ (github.event_name == 'workflow_run' && github.event.workflow_run.event != 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}"
+
+      - name: Set ENS contenthash (push to main or manual with update_ens=true)
+        if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.update_ens == 'true') }}
+        env:
+          ENS_NAME: ${{ vars.ENS_NAME || secrets.ENS_NAME }}
+          IPFS_CID: ${{ steps.filecoin.outputs.ipfsRootCid }}
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          ENS_PRIVATE_KEY: ${{ secrets.ENS_PRIVATE_KEY }}
+        run: |
+          node --version
+          npm --version
+          npm install --no-audit --no-fund
+          node scripts/update-ens.mjs

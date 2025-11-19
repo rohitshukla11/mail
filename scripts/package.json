@@ -1,0 +1,22 @@
+{
+  "name": "@dmail/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dmail-send": "./sendEmail.js",
+    "dmail-read": "./readInbox.js"
+  },
+  "scripts": {
+    "send": "node ./sendEmail.js",
+    "read": "node ./readInbox.js"
+  },
+  "dependencies": {
+    "@dmail/core": "file:../packages/core",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.4",
+    "mime-types": "^2.1.35",
+    "yargs": "^17.7.2"
+  }
+}
+
